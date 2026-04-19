@@ -139,14 +139,15 @@ async def generate_title_and_description(property_details):
     messages = [
         {
             "role": "system",
-            "content": "You generate professional listings for rental properties. Ensure the text is clean and is optimized for platforms such as Facebook Marketplace and Kijiji. No emojis and no stars, as it looks unprofessional and don't render well on the platform. You can use dashes though for lisiting elements.",
+            "content": "You generate professional listings for rental properties. Ensure the text is clean and is optimized for platforms such as Facebook Marketplace and Kijiji. No emojis and no stars, as it looks unprofessional and don't render well on the platform. You can use dashes though for lisiting elements. Interested people can contact me at my phone number: 4166691194",
         },
         {
             "role": "user",
             "content": f"Generate a description for a rental property with the following details: {property_details}",
         },
     ]
-    response = await AsyncClient().chat(model="qwen3.5", messages=messages)
+    # try playing around with gemma4 and qwen3.5 to see which yields better results
+    response = await AsyncClient().chat(model="gemma4", messages=messages)
     description = response.message.content
     messages.append(response.message)
 
