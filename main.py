@@ -1,13 +1,17 @@
 import asyncio
 import json
 import os
+import random
 from datetime import datetime
 
 from dotenv import load_dotenv
 from ollama import AsyncClient
-from playwright.async_api import async_playwright
+from playwright.async_api import BrowserContext, Page, async_playwright
+
+from facebook_functions import check_logged_in_facebook, post_on_facebook
 
 load_dotenv("secrets.env")
+
 
 # CREDS
 EMAIL = os.getenv("EMAIL")
@@ -24,9 +28,12 @@ BROWSER_STATE_PATH = "playwright/.auth/state.json"
 
 PROPERTY_DATA_PATH = "houses.json"
 
+POSTING_LIMIT = asyncio.Semaphore(3)
+FILE_LOCK = asyncio.Lock()
+
 
 async def main():
-    print("Hello from rental-suite!")
+    print("Hello from rental-suite!\n")
 
     # TODO: make async with aiofiles
     with open(PROPERTY_DATA_PATH, "r") as file:
@@ -42,6 +49,32 @@ async def main():
         for property in posting_properties:
             print(f"{property['facebook_formatted_address']} - {property['type']}")
         print()
+
+    # start title and description generations tasks for all properties that need it
+    # generate new title and description if ad has been posted 0, or 5 or more times
+    new_titles_and_descriptions_properties = [
+        posting_property
+        for posting_property in posting_properties
+        if posting_property["number_posted_times"] % 5 == 0
+    ]
+
+    if new_titles_and_descriptions_properties:
+        print("Generating titles and descriptions for:")
+        for posting_property in new_titles_and_descriptions_properties:  # noqa
+            print(
+                f"{posting_property['facebook_formatted_address']} - {property['type']}"
+            )
+        print()
+
+        generate_tasks = [
+            asyncio.create_task(generate_title_and_description(property))
+            for property in new_titles_and_descriptions_properties
+        ]
+        results = await asyncio.gather(*generate_tasks)
+
+        for property, result in zip(new_titles_and_descriptions_properties, results):
+            property["title"] = result[0]
+            property["description"] = result[1]
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False, slow_mo=100)
@@ -70,47 +103,73 @@ async def main():
         else:
             print("User is already logged in. Proceeding...")
 
-        # TODO: create task to generate new title and description for ads that need it, so it runs in background thread, and doesn't block the main thread
+        print()
 
-        for posting_property in posting_properties:
-            # 1. NAVIGATE TO POSTING AD PAGE
-            await facebook_page.goto(FACEBOOK_NEW_LISTING_URL)
+        # TODO: Check if user is logged into kijiji
 
-            # sanity check if user is logged in
-            if not check_logged_in_facebook(facebook_page):
-                print("An error has occurred. Please check if user is logged in.")
-                return
+        facebook_posting_tasks = [
+            asyncio.create_task(
+                post_single_facebook_listing(context, posting_property, data)
+            )
+            for posting_property in posting_properties
+        ]
 
-            # generate new title and description if ad has been posted 0, or 5 or more times
-            if posting_property["number_posted_times"] % 5 == 0:
-                print(
-                    f"Generating title and description for {posting_property['facebook_formatted_address']} - {posting_property['type']}"
-                )
-                title, description = await generate_title_and_description(
-                    str(posting_property)
-                )
-                posting_property["title"] = title
-                posting_property["description"] = description
+        await asyncio.gather(*facebook_posting_tasks)
 
-            await post_on_facebook(facebook_page, posting_property)
-            # Update property details
-            posting_property["last_posted"] = datetime.now().strftime("%Y-%m-%d")
-            posting_property["number_posted_times"] += 1
+        await facebook_page.goto(FACEBOOK_SELLER_DASHBOARD_URL)
+        print("Facebook posting completed!")
 
-            # Wait for a few seconds to allow the page to process the save action.
-            await facebook_page.wait_for_timeout(15000)
+        # TODO: launch kijiji tasks
 
-            # go to dashboard and check if the listing is there, if so, then we know it was successful
-            await facebook_page.goto(FACEBOOK_SELLER_DASHBOARD_URL)
-            await facebook_page.wait_for_timeout(10000)
-
-        # Save the current browser context state (cookies, local storage) for future runs.
-        storage = await context.storage_state(path=BROWSER_STATE_PATH)
         await browser.close()
 
     # save json changes
     with open(PROPERTY_DATA_PATH, "w") as file:
-        json.dump(data, file, indent=4)
+        json.dump(data, file, indent=2)
+
+
+async def post_single_facebook_listing(
+    context: BrowserContext, relevant_property, all_data
+):
+    """
+    Post a single listing on Facebook Marketplace.
+    """
+
+    page = await context.new_page()
+
+    async with POSTING_LIMIT:
+        delay = random.uniform(3, 7)
+        asyncio.sleep(delay)
+
+        # 1. NAVIGATE TO POSTING AD PAGE
+        await page.goto(FACEBOOK_NEW_LISTING_URL)
+
+        # sanity check if user is logged in
+        if not await check_logged_in_facebook(page):
+            print("An error has occurred. Please check if user is logged in.")
+            return
+
+        await post_on_facebook(page, relevant_property)
+        # Update property details
+        relevant_property["last_posted"] = datetime.now().strftime("%Y-%m-%d")
+        relevant_property["number_posted_times"] += 1
+
+        # Wait for a few seconds to allow the page to process the save action.
+        await page.wait_for_timeout(15000)
+
+        async with FILE_LOCK:
+            # save json changes
+            with open(PROPERTY_DATA_PATH, "w") as file:
+                json.dump(all_data, file, indent=2)
+
+            # Save the current browser context state (cookies, local storage) for future runs.
+            storage = await context.storage_state(path=BROWSER_STATE_PATH)
+
+        print(
+            f"Saved update for {relevant_property['facebook_formatted_address']} - {relevant_property['type']}"
+        )
+
+        await page.close()
 
 
 def get_posting_properties(properties):
@@ -147,149 +206,17 @@ async def generate_title_and_description(property_details):
         },
     ]
     # try playing around with gemma4 and qwen3.5 to see which yields better results
-    response = await AsyncClient().chat(model="gemma4", messages=messages)
+    response = await AsyncClient().chat(model="qwen3.5", messages=messages, think=False)
     description = response.message.content
     messages.append(response.message)
 
     messages.append(
         {"role": "user", "content": "Now, generate a title for this description."}
     )
-    response = await AsyncClient().chat(model="qwen3.5", messages=messages)
+    response = await AsyncClient().chat(model="qwen3.5", messages=messages, think=False)
     title = response.message.content
 
     return title, description
-
-
-# FACEBOOK MARKETPLACE FUNCTIONS
-async def check_logged_in_facebook(page):
-    """
-    NEED TO UPDATE TO BE FACEBOOK SPECIFIC -
-
-    Check if the user is currently logged in to Facebook.
-
-    This function looks for a specific element (the 'Me' button) that is only visible when a user is logged in.
-    If the element is found and visible, it returns True, indicating that the user is logged in. Otherwise, it returns False.
-
-    Args:
-        page: The Playwright page object representing the current browser page.
-
-    Returns:
-        bool: True if the user is logged in, False otherwise.
-    """
-    return await page.get_by_role("heading", name="New property listing").is_visible()
-
-
-async def post_on_facebook(page, relevant_property):
-    # 1. add photos
-    property_images = relevant_property["images"]
-
-    # This bypasses the click and the file browser window entirely
-    await page.set_input_files(
-        "input[type='file']",
-        property_images,
-    )
-
-    # # WAIT FOR IMAGES TO UPLOAD
-    await page.wait_for_timeout(5000)
-
-    # 2. property type - always rental
-    await (
-        page.get_by_role("combobox", name="Property for sale or rent")
-        .locator("i")
-        .click()
-    )
-    await page.get_by_role("option", name="Rent").click()
-    # always house
-    await (
-        page.get_by_role("combobox", name="Type of property for rent")
-        .locator("i")
-        .click()
-    )
-    await page.get_by_role("option", name="House", exact=True).click()
-
-    # 3. private room? - CHANGES LAYOUT
-    if relevant_property["private_room"]:
-        await page.get_by_role("switch", name="This is a private room in a").check()
-        await page.get_by_role("textbox", name="How many people live here?").click()
-        await page.get_by_role("textbox", name="How many people live here?").fill("3")
-
-        # 4. price
-        rent = relevant_property["rent"]
-        await page.get_by_role("textbox", name="Price per month").click()
-        await page.get_by_role("textbox", name="Price per month").fill(f"${rent}")
-
-        # 5. bathrooms and bedrooms
-        await (
-            page.get_by_role("combobox", name="Bathroom type").locator("i").click()
-        )  # Only appears if private room is selected, I believe
-        await page.get_by_role("option", name="Private").click()
-        await page.get_by_role("textbox", name="Number of bedrooms").click()
-        await page.get_by_role("textbox", name="Number of bedrooms").fill(
-            f"{relevant_property['bedrooms']}"
-        )
-        await page.get_by_role("textbox", name="Number of bathrooms").click()
-        await page.get_by_role("textbox", name="Number of bathrooms").fill(
-            f"{relevant_property['bathrooms']}"
-        )
-    else:
-        # 4. bathrooms and bedrooms
-        await page.get_by_role("textbox", name="Number of bedrooms").click()
-        await page.get_by_role("textbox", name="Number of bedrooms").fill(
-            f"{relevant_property['bedrooms']}"
-        )
-        await page.get_by_role("textbox", name="Number of bathrooms").click()
-        await page.get_by_role("textbox", name="Number of bathrooms").fill(
-            f"{relevant_property['bathrooms']}"
-        )
-
-        # 5. price
-        rent = relevant_property["rent"]
-        await page.get_by_role("textbox", name="Price per month").click()
-        await page.get_by_role("textbox", name="Price per month").fill(f"${rent}")
-
-    # 6. location
-    address = relevant_property["facebook_formatted_address"]
-    await page.get_by_label("", exact=True).nth(2).click()
-    await page.get_by_label("", exact=True).nth(2).fill(address)
-    await page.locator("li").filter(has_text=address).get_by_role("option").click()
-
-    # 7. description
-    description = relevant_property["description"]
-    await page.get_by_role("textbox", name="Property for rent description").click()
-    await page.get_by_role("textbox", name="Property for rent description").fill(
-        description
-    )
-
-    # 8. square footage
-    await page.get_by_role("textbox", name="Property square feet").click()
-    await page.get_by_role("textbox", name="Property square feet").fill(
-        f"{relevant_property['sqft']}"
-    )
-
-    # 9. date
-    # BETTER TECHNIQUE - JUST TYPE
-    await page.get_by_role("combobox", name="Choose date Choose date").click()
-    await page.get_by_role("combobox", name="Choose date Choose date").fill(
-        relevant_property["date_available"]
-    )
-    await page.get_by_role("combobox", name="Choose date Choose date").press("Enter")
-
-    # 10. washing machine and dryer
-    await (
-        page.get_by_role("combobox", name="Washing machine/dryer").locator("i").click()
-    )
-    await page.get_by_role("option", name="Washing machine/dryer").click()
-
-    # 11. SOMETHING GOES HERE
-
-    # 12. parking
-
-    # 13. cooling and heating
-
-    # 14. next and post
-    await page.get_by_role("button", name="Next", exact=True).click()
-    await page.get_by_role("button", name="Publish").click()
-    print("Ad posted!")
 
 
 # B. KIJIJI FUNCTIONS
