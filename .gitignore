@@ -205,3 +205,13 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# SENSITIVE
+#  The following files may contain sensitive information such as credentials, personal data, or secrets.
+#  Make sure to keep these files secure and do not commit them to version control.
+
+*.env
+playwright/
+houses.json
+*.jpg
+
