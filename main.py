@@ -32,17 +32,16 @@ async def main():
     with open(PROPERTY_DATA_PATH, "r") as file:
         data = json.load(file)
 
-    # TODO: find relevant property for program, will be factored out later
-    posting_properties = []
-    for property in data["properties"]:
-        subsections = property["subsections"]
-        for subsection in subsections:
-            if subsection["active"]:
-                posting_properties.append(subsection)
+    posting_properties = get_posting_properties(data["properties"])
 
     if not posting_properties:
         print("No posting properties found. Check your config and try again.")
         return
+    else:
+        print(f"Found {len(posting_properties)} posting properties. Posting...")
+        for property in posting_properties:
+            print(f"{property['facebook_formatted_address']} - {property['type']}")
+        print()
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False, slow_mo=100)
@@ -50,34 +49,42 @@ async def main():
         facebook_page = await context.new_page()
         kijiji_page = await context.new_page()
 
+        # check is user logged in to facebook
+        await facebook_page.goto(FACEBOOK_NEW_LISTING_URL)
+
+        print("Checking if user is already logged in to facebook...")
+        # Check for a visible element that confirms the user is logged in (e.g., the 'Me' button).
+
+        if not await check_logged_in_facebook(facebook_page):
+            print(
+                "User is not logged in. Login manually and save the browser state. You have 40 seconds to log in before the script closes..."
+            )
+            await facebook_page.wait_for_timeout(
+                40000
+            )  # Wait for a 40 seconds to allow user to log in manually if automatic login fails.
+
+            # Save current browser state after manual login attempt.
+            await context.storage_state(path=BROWSER_STATE_PATH)
+            return
+
+        else:
+            print("User is already logged in. Proceeding...")
+
+        # TODO: create task to generate new title and description for ads that need it, so it runs in background thread, and doesn't block the main thread
+
         for posting_property in posting_properties:
             # 1. NAVIGATE TO POSTING AD PAGE
             await facebook_page.goto(FACEBOOK_NEW_LISTING_URL)
 
-            # 2. LOGIN, ASSUME ALREADY LOGGED IN, USING BROWSER CONTEXT
-            print("Checking if user is already logged in...")
-            # Check for a visible element that confirms the user is logged in (e.g., the 'Me' button).
-
-            if not await check_logged_in(facebook_page):
-                print(
-                    "User is not logged in. Login manually and save the browser state. You have 40 seconds to log in before the script closes..."
-                )
-                await facebook_page.wait_for_timeout(
-                    40000
-                )  # Wait for a 40 seconds to allow user to log in manually if automatic login fails.
-
-                # Save current browser state after manual login attempt.
-                await context.storage_state(path=BROWSER_STATE_PATH)
+            # sanity check if user is logged in
+            if not check_logged_in_facebook(facebook_page):
+                print("An error has occurred. Please check if user is logged in.")
                 return
 
-            else:
-                print("User is already logged in. Proceeding...")
-
-            # generate new title and description if needed
-            # add logic to update description if add has been posted more than 5 times
+            # generate new title and description if ad has been posted 0, or 5 or more times
             if posting_property["number_posted_times"] % 5 == 0:
                 print(
-                    f"Generating description for {posting_property['facebook_formatted_address']}. ID: {posting_property['id']}"
+                    f"Generating title and description for {posting_property['facebook_formatted_address']} - {posting_property['type']}"
                 )
                 title, description = await generate_title_and_description(
                     str(posting_property)
@@ -106,7 +113,71 @@ async def main():
         json.dump(data, file, indent=4)
 
 
-# FB MARKETPLACE IMPLEMENTATION
+def get_posting_properties(properties):
+    """
+    Get posting properties from the data file.
+    Args:
+        properties (list): A list of properties and their details
+
+    Returns:
+        posting_properties (list): A list of posting properties
+    """
+
+    posting_properties = []
+    for property in properties:
+        subsections = property["subsections"]
+        for subsection in subsections:
+            if subsection["active"]:
+                posting_properties.append(subsection)
+
+    return posting_properties
+
+
+# GENERATE
+# NOTE: Might want to add a generate title function
+async def generate_title_and_description(property_details):
+    messages = [
+        {
+            "role": "system",
+            "content": "You generate professional listings for rental properties. Ensure the text is clean and is optimized for platforms such as Facebook Marketplace and Kijiji. No emojis and no stars, as it looks unprofessional and don't render well on the platform. You can use dashes though for lisiting elements.",
+        },
+        {
+            "role": "user",
+            "content": f"Generate a description for a rental property with the following details: {property_details}",
+        },
+    ]
+    response = await AsyncClient().chat(model="qwen3.5", messages=messages)
+    description = response.message.content
+    messages.append(response.message)
+
+    messages.append(
+        {"role": "user", "content": "Now, generate a title for this description."}
+    )
+    response = await AsyncClient().chat(model="qwen3.5", messages=messages)
+    title = response.message.content
+
+    return title, description
+
+
+# FACEBOOK MARKETPLACE FUNCTIONS
+async def check_logged_in_facebook(page):
+    """
+    NEED TO UPDATE TO BE FACEBOOK SPECIFIC -
+
+    Check if the user is currently logged in to Facebook.
+
+    This function looks for a specific element (the 'Me' button) that is only visible when a user is logged in.
+    If the element is found and visible, it returns True, indicating that the user is logged in. Otherwise, it returns False.
+
+    Args:
+        page: The Playwright page object representing the current browser page.
+
+    Returns:
+        bool: True if the user is logged in, False otherwise.
+    """
+    return await page.get_by_role("heading", name="New property listing").is_visible()
+
+
 async def post_on_facebook(page, relevant_property):
     # 1. add photos
     property_images = relevant_property["images"]
@@ -220,55 +291,11 @@ async def post_on_facebook(page, relevant_property):
     print("Ad posted!")
 
 
-# B. KIJIJI IMPLEMENTATION
+# B. KIJIJI FUNCTIONS
 
 # 3. ADS MANAGER
 # REPUSH AD, IF AVAILABLE
 # MANAGE SIMPLE CHATS
-
-# add generate title function
-
-
-async def generate_title_and_description(property_details):
-    messages = [
-        {
-            "role": "system",
-            "content": "You generate professional listings for rental properties. Ensure the text is clean and is optimized for platforms such as Facebook Marketplace and Kijiji",
-        },
-        {
-            "role": "user",
-            "content": f"Generate a description for a rental property with the following details: {property_details}",
-        },
-    ]
-    response = await AsyncClient().chat(model="qwen3.5", messages=messages)
-    description = response.message.content
-    messages.append(response.message)
-
-    messages.append(
-        {"role": "user", "content": "Now, generate a title for this description."}
-    )
-    response = await AsyncClient().chat(model="qwen3.5", messages=messages)
-    title = response.message.content
-
-    return title, description
-
-
-async def check_logged_in(page):
-    """
-    NEED TO UPDATE TO BE FACEBOOK SPECIFIC -
-
-    Check if the user is currently logged in to Facebook.
-
-    This function looks for a specific element (the 'Me' button) that is only visible when a user is logged in.
-    If the element is found and visible, it returns True, indicating that the user is logged in. Otherwise, it returns False.
-
-    Args:
-        page: The Playwright page object representing the current browser page.
-
-    Returns:
-        bool: True if the user is logged in, False otherwise.
-    """
-    return await page.get_by_role("heading", name="New property listing").is_visible()
 
 
 if __name__ == "__main__":

@@ -1,3 +1,5 @@
+# this is just a test file, to test the json structure
+
 import json
 
 with open("houses.json") as file:
