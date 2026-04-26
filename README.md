@@ -7,8 +7,10 @@ Post rental listings to Facebook Marketplace and Kijiji — automatically, concu
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Ollama](https://img.shields.io/badge/Ollama-fff?style=for-the-badge&logo=ollama&logoColor=000)
 ![Qwen](https://custom-icon-badges.demolab.com/badge/Qwen-605CEC?style=for-the-badge&logo=qwen&logoColor=fff)
-![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)
 ![Pydantic](https://img.shields.io/badge/Pydantic-fff?style=for-the-badge&logo=pydantic&logoColor=00527B)
+[![Playwright](https://custom-icon-badges.demolab.com/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=fff)](#)
+
+---
 
 ## What is it?
 
@@ -189,6 +191,6 @@ All property data lives in `houses.json`. Here's a minimal example:
 
 <div align="center">
 
-Detail once, list everywhere. &nbsp;·&nbsp; For those who can't bear listing another ad
+Detail once, list everywhere. &nbsp;·&nbsp; For those who can't bear listing another ad 😅
 
 </div>
