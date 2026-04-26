@@ -6,7 +6,7 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 from ollama import AsyncClient
-from playwright.async_api import BrowserContext, Page, async_playwright
+from playwright.async_api import BrowserContext, async_playwright
 from pydantic import BaseModel, Field
 
 from facebook_functions import check_logged_in_facebook, post_on_facebook
@@ -337,7 +337,7 @@ async def post_single_facebook_listing(
                 json.dump(all_data, file, indent=2)
 
             # Save the current browser context state (cookies, local storage) for future runs.
-            storage = await context.storage_state(path=BROWSER_STATE_PATH)
+            await context.storage_state(path=BROWSER_STATE_PATH)
 
         print(
             f"Saved update for {relevant_property['facebook_formatted_address']} - {relevant_property['type']}"
@@ -396,7 +396,7 @@ async def post_single_kijiji_listing(
                 json.dump(all_data, file, indent=2)
 
             # Save the current browser context state (cookies, local storage) for future runs.
-            storage = await context.storage_state(path=BROWSER_STATE_PATH)
+            await context.storage_state(path=BROWSER_STATE_PATH)
 
         print(
             f"Saved update for {relevant_property['facebook_formatted_address']} - {relevant_property['type']}"
