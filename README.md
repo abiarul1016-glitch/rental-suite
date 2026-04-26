@@ -1,4 +1,4 @@
-# Rental Suite
+# rental suite
 
 Post rental listings to Facebook Marketplace and Kijiji — automatically, concurrently, and with AI-generated content.
 
@@ -14,7 +14,7 @@ Post rental listings to Facebook Marketplace and Kijiji — automatically, concu
 
 ## What is it?
 
-Landlords and property managers spend hours manually copying listing details, filling out forms, and re-posting the same property over and over — only for platforms to flag duplicate content. **Rental Suite** automates all of that.
+Landlords and property managers spend hours manually copying listing details, filling out forms, and re-posting the same property over and over — only for platforms to flag duplicate content. **rental suite** automates all of that.
 
 Define your properties once in a JSON file, and the suite handles the rest: generating fresh titles and descriptions with AI, logging into Facebook and Kijiji, filling out every field, uploading photos, and tracking posting history — all in a single run.
 
@@ -30,13 +30,13 @@ Define your properties once in a JSON file, and the suite handles the rest: gene
 
 ## How it works
 
-Rental Suite operates as a multi-stage pipeline, moving from data ingestion to live listing publication with minimal human intervention.
+**rental suite** operates as a multi-stage pipeline, moving from data ingestion to live listing publication with minimal human intervention.
 
 1. **Data Loading (`houses.json`)** — The system reads all property data from a structured JSON file, filtering only active listings marked for posting.
 2. **AI Content Generation (`main.py`)** — Properties that need fresh copy are sent to a local LLM (Qwen 3.5 via Ollama) to generate titles, descriptions, and tags. This happens every 5 postings to keep listings unique.
 3. **Browser Launch (`main.py`)** — A Chromium browser is launched via Playwright. Login status is checked on both Facebook and Kijiji.
    - If not logged in, you have **40 seconds** to log in manually — the browser state is then saved for future runs.
-4. **Concurrent Posting** — All listings are posted to both platforms simultaneously using async tasks. Rental Suite handles form filling, photo uploads, and property type selection, within the bounds of ad details, such as amenities and pricing.
+4. **Concurrent Posting** — All listings are posted to both platforms simultaneously using async tasks. **rental suite** handles form filling, photo uploads, and property type selection, within the bounds of ad details, such as amenities and pricing.
 5. **Data Update** — After posting completes, the `houses.json` file is updated with new posting counts and timestamps.
 
 ### Flow Diagram
@@ -63,7 +63,7 @@ Update houses.json
 
 ## Tech stack
 
-Rental Suite is a local-first, Python-driven automation tool.
+**rental suite** is a local-first, Python-driven automation tool.
 
 | Layer                  | Technology        | Purpose                                           |
 | :--------------------- | :---------------- | :------------------------------------------------ |
@@ -191,6 +191,8 @@ All property data lives in `houses.json`. Here's a minimal example:
 
 <div align="center">
 
-Detail once, list everywhere. &nbsp;·&nbsp; For those who can't bear listing another ad 😅
+_Detail once, list everywhere._
+
+For those who can't bear listing another ad 😅.
 
 </div>
